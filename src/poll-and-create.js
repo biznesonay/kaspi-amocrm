@@ -20,6 +20,16 @@ const stats = {
   startTime: Date.now()
 };
 
+function resetStats() {
+  stats.ordersProcessed = 0;
+  stats.ordersFailed = 0;
+  stats.ordersSkipped = 0;
+  stats.totalAmount = 0;
+  stats.processingTimes = [];
+  stats.errors = [];
+  stats.startTime = Date.now();
+}
+
 /**
  * Обрабатывает один заказ из Kaspi
  */
@@ -181,28 +191,30 @@ async function pollAndCreate() {
       logger.info('Другой процесс уже выполняет опрос, пропускаем');
       return;
     }
-    
-    logger.info({ 
+
+    resetStats();
+
+    logger.info({
       dryRun: config.DRY_RUN,
       allowedStates: config.KASPI_ALLOWED_STATES_ARRAY
     }, '🚀 Начинаем опрос Kaspi');
-    
-    // Получаем заказы из Kaspi
-    const ordersResponse = await kaspiService.getOrders({
+
+    // Получаем заказы из Kaspi (все страницы)
+    const orders = await kaspiService.getAllOrders({
       state: config.KASPI_ALLOWED_STATES_ARRAY,
       sort: 'createdAt:desc'
     });
-    
-    const orders = ordersResponse.data || [];
-    logger.info({ ordersCount: orders.length }, 'Получены заказы из Kaspi');
-    
-    if (orders.length === 0) {
+
+    const totalOrdersCount = orders.length;
+    logger.info({ ordersCount: totalOrdersCount }, 'Получены заказы из Kaspi');
+
+    if (totalOrdersCount === 0) {
       logger.info('Нет новых заказов для обработки');
       await repository.releaseLock('poll');
       await repository.updateHeartbeat();
       return;
     }
-    
+
     // Обрабатываем заказы последовательно (чтобы соблюдать rate limit)
     for (const order of orders) {
       await processOrder(order);
@@ -226,9 +238,9 @@ async function pollAndCreate() {
     
     await repository.setMeta('total_orders_processed', totalProcessed + stats.ordersProcessed);
     await repository.setMeta('total_orders_failed', totalFailed + stats.ordersFailed);
-    
+
     // Проверяем пороги для алертов
-    const backlog = orders.length - stats.ordersProcessed - stats.ordersSkipped;
+    const backlog = totalOrdersCount - stats.ordersProcessed - stats.ordersSkipped;
     if (backlog >= config.ALERT_BACKLOG_THRESHOLD) {
       await alertService.sendWarningAlert(
         'Большой backlog заказов',
