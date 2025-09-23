@@ -456,8 +456,17 @@ async logError(errorTypeOrObject, errorMessage, errorDetails = null, orderCode =
           orders_failed: db.raw('daily_stats.orders_failed + ?', [data.orders_failed]),
           total_amount: db.raw('daily_stats.total_amount + ?', [data.total_amount]),
           avg_processing_time_ms: db.raw(
-            '(daily_stats.avg_processing_time_ms * daily_stats.orders_processed + ?) / (daily_stats.orders_processed + ?)',
-            [data.avg_processing_time_ms * data.orders_processed, data.orders_processed]
+            `CASE
+              WHEN COALESCE(daily_stats.orders_processed, 0) + ? > 0
+                THEN (COALESCE(daily_stats.avg_processing_time_ms, 0) * COALESCE(daily_stats.orders_processed, 0) + ?) /
+                     (COALESCE(daily_stats.orders_processed, 0) + ?)
+              ELSE 0
+            END`,
+            [
+              data.orders_processed,
+              data.avg_processing_time_ms * data.orders_processed,
+              data.orders_processed
+            ]
           ),
           updated_at_utc: nowUtc()
         });
