@@ -1,0 +1,73 @@
+# Зависимости
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Переменные окружения
+.env
+.env.local
+.env.production
+.env.*.local
+
+# База данных
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Логи
+logs/
+*.log
+log/
+*.log.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Временные файлы
+tmp/
+temp/
+.tmp/
+*.tmp
+*.temp
+
+# Резервные копии
+*.bak
+*.backup
+*.old
+
+# Тестовые данные
+test-data/
+fixtures/
+
+# Системные файлы
+.directory
+.Trash-*
+.nfs*
+
+# Кэш
+.cache/
+*.cache
+
+# Покрытие тестов
+coverage/
+.nyc_output/
+
+# Сборки
+dist/
+build/
+out/
+
+# Локальные скрипты
+local-*.js
+test-*.js
+*.local.js
