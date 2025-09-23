@@ -1,5 +1,9 @@
 import { parsePhoneNumber, isValidPhoneNumber } from 'libphonenumber-js';
-import logger from '../utils/logger.js';
+import logger, { maskPhone as maskPhoneFromLogger } from '../utils/logger.js';
+
+const maskPhone = maskPhoneFromLogger;
+
+export { maskPhone };
 
 /**
  * Нормализует телефонный номер в формат E.164
@@ -154,5 +158,6 @@ export default {
   formatPhoneForDisplay,
   isValidPhone,
   extractPhoneFromBuyer,
-  generateContactName
+  generateContactName,
+  maskPhone
 };

@@ -4,7 +4,7 @@
  */
 
 import config from '../config/env.js';
-import amoCRM from '../services/amocrm.js';
+import amoCRMService from '../services/amocrm.js';
 import logger from '../utils/logger.js';
 
 console.log('🔍 Получение ID полей из amoCRM\n');
