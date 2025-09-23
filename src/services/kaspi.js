@@ -60,9 +60,18 @@ const KaspiOrdersResponseSchema = z.object({
 
 class KaspiService {
   constructor() {
-    // Базовый URL для Kaspi API (нужно будет уточнить у Kaspi)
-    this.baseURL = 'https://api.kaspi.kz/shop/api';
-    
+    const rawBaseUrl = config.KASPI_BASE_URL.replace(/\/+$/, '');
+    const rawVersion = (config.KASPI_API_VERSION || '').toString().trim();
+    const normalizedVersion = rawVersion.replace(/^\/+|\/+$/g, '');
+
+    if (normalizedVersion && rawBaseUrl.endsWith(`/${normalizedVersion}`)) {
+      this.baseURL = rawBaseUrl;
+    } else if (normalizedVersion) {
+      this.baseURL = `${rawBaseUrl}/${normalizedVersion}`;
+    } else {
+      this.baseURL = rawBaseUrl;
+    }
+
     this.client = axios.create({
       baseURL: this.baseURL,
       timeout: 30000,

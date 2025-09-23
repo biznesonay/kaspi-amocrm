@@ -134,6 +134,82 @@ class AmoCRMService {
   }
   
   /**
+   * Универсальный helper для выполнения REST-запросов к amoCRM
+   */
+  async request(method, path, options = {}) {
+    const {
+      params,
+      data,
+      headers,
+      context,
+      maxAttempts = 3
+    } = options;
+
+    const normalizedMethod = method.toUpperCase();
+
+    return await withRetry(
+      async () => {
+        const response = await this.client.request({
+          method: normalizedMethod.toLowerCase(),
+          url: path,
+          params,
+          data,
+          headers
+        });
+
+        return response.data;
+      },
+      {
+        maxAttempts,
+        shouldRetry: isRetryableError,
+        context: context || `amoCRM.request.${normalizedMethod}.${path}`
+      }
+    );
+  }
+
+  /**
+   * Возвращает информацию об аккаунте amoCRM
+   */
+  async getAccountInfo() {
+    return await this.request('GET', '/account', {
+      context: 'amoCRM.getAccountInfo'
+    });
+  }
+
+  /**
+   * Получает список воронок и статусов
+   */
+  async getPipelines() {
+    return await this.request('GET', '/leads/pipelines', {
+      context: 'amoCRM.getPipelines'
+    });
+  }
+
+  /**
+   * Получает кастомные поля для указанной сущности
+   */
+  async getCustomFields(entity) {
+    const sanitizedEntity = String(entity).replace(/[^a-zA-Z_]/g, '');
+
+    if (!sanitizedEntity) {
+      throw new Error(`Некорректная сущность для получения кастомных полей: ${entity}`);
+    }
+
+    return await this.request('GET', `/${sanitizedEntity}/custom_fields`, {
+      context: `amoCRM.getCustomFields.${sanitizedEntity}`
+    });
+  }
+
+  /**
+   * Получает список каталогов
+   */
+  async getCatalogs() {
+    return await this.request('GET', '/catalogs', {
+      context: 'amoCRM.getCatalogs'
+    });
+  }
+
+  /**
    * Ищет контакт по телефону
    */
   async findContactByPhone(phone) {

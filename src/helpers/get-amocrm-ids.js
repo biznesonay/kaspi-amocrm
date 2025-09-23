@@ -3,24 +3,24 @@
  * Запуск: node src/helpers/get-amocrm-ids.js
  */
 
-import { config } from '../config/env.js';
-import { amoCRM } from '../services/amocrm.js';
-import { logger } from '../utils/logger.js';
+import config from '../config/env.js';
+import amoCRM from '../services/amocrm.js';
+import logger from '../utils/logger.js';
 
 console.log('🔍 Получение ID полей из amoCRM\n');
-console.log('База:', config.amocrm.baseUrl);
+console.log('База:', config.AMO_BASE_URL);
 console.log('=========================================\n');
 
 async function getAmoCRMInfo() {
   try {
     // Инициализируем токены
-    await amoCRM.init();
+    await amoCRMService.getValidTokens();
     console.log('✅ Авторизация успешна\n');
 
     // 1. Получаем информацию об аккаунте
     console.log('📊 ИНФОРМАЦИЯ ОБ АККАУНТЕ:');
     console.log('-----------------------------------');
-    const accountInfo = await amoCRM.makeRequest('/api/v4/account', 'GET');
+    const accountInfo = await amoCRMService.getAccountInfo();
     console.log('ID аккаунта:', accountInfo.id);
     console.log('Название:', accountInfo.name);
     console.log('Субдомен:', accountInfo.subdomain);
@@ -30,7 +30,7 @@ async function getAmoCRMInfo() {
     // 2. Получаем воронки и статусы
     console.log('🔄 ВОРОНКИ И СТАТУСЫ:');
     console.log('-----------------------------------');
-    const pipelines = await amoCRM.makeRequest('/api/v4/leads/pipelines', 'GET');
+    const pipelines = await amoCRMService.getPipelines();
     
     if (pipelines._embedded && pipelines._embedded.pipelines) {
       for (const pipeline of pipelines._embedded.pipelines) {
@@ -55,7 +55,7 @@ async function getAmoCRMInfo() {
     // 3. Получаем кастомные поля для контактов
     console.log('👤 КАСТОМНЫЕ ПОЛЯ КОНТАКТОВ:');
     console.log('-----------------------------------');
-    const contactFields = await amoCRM.makeRequest('/api/v4/contacts/custom_fields', 'GET');
+    const contactFields = await amoCRMService.getCustomFields('contacts');
     
     if (contactFields._embedded && contactFields._embedded.custom_fields) {
       for (const field of contactFields._embedded.custom_fields) {
@@ -82,7 +82,7 @@ async function getAmoCRMInfo() {
     // 4. Получаем кастомные поля для сделок
     console.log('💼 КАСТОМНЫЕ ПОЛЯ СДЕЛОК:');
     console.log('-----------------------------------');
-    const leadFields = await amoCRM.makeRequest('/api/v4/leads/custom_fields', 'GET');
+    const leadFields = await amoCRMService.getCustomFields('leads');
     
     if (leadFields._embedded && leadFields._embedded.custom_fields) {
       for (const field of leadFields._embedded.custom_fields) {
@@ -108,7 +108,7 @@ async function getAmoCRMInfo() {
     // 5. Получаем кастомные поля для компаний
     console.log('🏢 КАСТОМНЫЕ ПОЛЯ КОМПАНИЙ:');
     console.log('-----------------------------------');
-    const companyFields = await amoCRM.makeRequest('/api/v4/companies/custom_fields', 'GET');
+    const companyFields = await amoCRMService.getCustomFields('companies');
     
     if (companyFields._embedded && companyFields._embedded.custom_fields) {
       for (const field of companyFields._embedded.custom_fields) {
@@ -116,7 +116,8 @@ async function getAmoCRMInfo() {
         console.log(`  ID: ${field.id}`);
         console.log(`  Code: ${field.code || 'не задан'}`);
         console.log(`  Type: ${field.type}`);
-        console.log(`');
+        console.log(`  Required: ${field.is_required ? 'Да' : 'Нет'}`);
+        console.log('');
       }
     }
 
@@ -124,7 +125,7 @@ async function getAmoCRMInfo() {
     console.log('📦 КАТАЛОГИ ТОВАРОВ:');
     console.log('-----------------------------------');
     try {
-      const catalogs = await amoCRM.makeRequest('/api/v4/catalogs', 'GET');
+      const catalogs = await amoCRMService.getCatalogs();
       
       if (catalogs._embedded && catalogs._embedded.catalogs) {
         for (const catalog of catalogs._embedded.catalogs) {

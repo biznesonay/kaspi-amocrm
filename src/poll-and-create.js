@@ -26,16 +26,32 @@ const stats = {
 async function processOrder(order) {
   const startTime = Date.now();
   const orderCode = order.code;
+  let existingOrder = null;
+  let previousRetryCount = 0;
   
   try {
     // Проверяем, не обработан ли уже заказ
-    const existingOrder = await repository.getProcessedOrder(orderCode);
-    if (existingOrder) {
-      logger.debug({ orderCode }, 'Заказ уже обработан, пропускаем');
+    existingOrder = await repository.getProcessedOrder(orderCode);
+      const isAlreadySuccessful = existingOrder?.processed_successfully ?? (Boolean(existingOrder?.amocrm_lead_id) && !existingOrder?.last_error);
+    if (isAlreadySuccessful) {
+      logger.debug({ orderCode, leadId: existingOrder.amocrm_lead_id }, 'Заказ уже успешно обработан, пропускаем');
       stats.ordersSkipped++;
       return;
     }
-    
+
+    if (existingOrder) {
+      previousRetryCount = Number(existingOrder.retry_count || 0);
+      if (existingOrder.last_error) {
+        logger.info({
+          orderCode,
+          retryCount: previousRetryCount,
+          lastError: existingOrder.last_error
+        }, 'Повторная обработка заказа после ошибки');
+      } else {
+        logger.debug({ orderCode, retryCount: previousRetryCount }, 'Повторная обработка заказа');
+      }
+    }
+
     // Извлекаем данные покупателя
     const phone = phoneService.extractPhoneFromBuyer(order.buyer);
     if (!phone) {
@@ -137,7 +153,7 @@ async function processOrder(order) {
       kaspiState: order.state,
       checksum: kaspiService.calculateChecksum(order),
       processingTimeMs: processingTime,
-      retryCount: 1,
+      retryCount: previousRetryCount + 1,
       lastError: error.message
     });
     

@@ -4,8 +4,8 @@
  */
 
 import axios from 'axios';
-import { config } from '../config/env.js';
-import { logger } from '../utils/logger.js';
+import config from '../config/env.js';
+import logger from '../utils/logger.js';
 
 console.log('🔍 Проверка Kaspi API\n');
 console.log('=========================================\n');
@@ -41,10 +41,10 @@ async function testKaspiEndpoint(baseUrl) {
         method: 'GET',
         url: fullUrl,
         headers: {
-          'Authorization': `Bearer ${config.kaspi.apiToken}`,
+          'Authorization': `Bearer ${config.KASPI_API_TOKEN}`,
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'X-API-KEY': config.kaspi.apiToken, // Альтернативный заголовок
+          'X-API-KEY': config.KASPI_API_TOKEN, // Альтернативный заголовок
         },
         params: {
           'page[number]': 0,
@@ -176,11 +176,11 @@ async function testCurrentConfig() {
   console.log('=========================================');
   
   // Получаем base URL из конфигурации
-  const currentBaseUrl = process.env.KASPI_BASE_URL || 'https://kaspi.kz/shop/api/v2';
+  const currentBaseUrl = config.KASPI_BASE_URL || 'https://kaspi.kz/shop/api/v2';
   console.log(`Base URL: ${currentBaseUrl}`);
-  console.log(`API Token: ${config.kaspi.apiToken ? '***' + config.kaspi.apiToken.slice(-4) : 'НЕ ЗАДАН'}`);
-  
-  if (!config.kaspi.apiToken) {
+  console.log(`API Token: ${config.KASPI_API_TOKEN ? '***' + config.KASPI_API_TOKEN.slice(-4) : 'НЕ ЗАДАН'}`);
+
+  if (!config.KASPI_API_TOKEN) {
     console.log('\n❌ KASPI_API_TOKEN не задан в .env!');
     console.log('Установите токен и попробуйте снова.');
     return null;

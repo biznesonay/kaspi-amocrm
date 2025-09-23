@@ -119,9 +119,11 @@ class Repository {
       .first();
     
     if (order) {
+      order.retry_count = Number(order.retry_count ?? 0);
       order.last_synced_at = fromDbDate(order.last_synced_at_utc);
       order.created_at = fromDbDate(order.created_at_utc);
       order.updated_at = fromDbDate(order.updated_at_utc);
+      order.processed_successfully = Boolean(order.amocrm_lead_id) && !order.last_error;
     }
     
     return order;
@@ -134,8 +136,8 @@ class Repository {
       kaspi_state: orderData.kaspiState,
       checksum: orderData.checksum,
       processing_time_ms: orderData.processingTimeMs,
-      retry_count: orderData.retryCount || 0,
-      last_error: orderData.lastError || null,
+      retry_count: orderData.retryCount ?? 0,
+      last_error: orderData.lastError ?? null,
       last_synced_at_utc: nowUtc(),
       updated_at_utc: nowUtc()
     };

@@ -5,7 +5,8 @@
 
 import axios from 'axios';
 import readline from 'readline';
-import { config } from '../config/env.js';
+import config from '../config/env.js';
+import logger from '../utils/logger.js';
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -24,13 +25,13 @@ console.log('=========================================\n');
 async function setupOAuth() {
   try {
     // Проверяем наличие базовых настроек
-    if (!config.amocrm.baseUrl) {
+    if (!config.AMO_BASE_URL) {
       console.log('❌ AMO_BASE_URL не задан в .env');
       console.log('Пример: https://your-subdomain.amocrm.ru');
       process.exit(1);
     }
     
-    if (!config.amocrm.clientId || !config.amocrm.clientSecret) {
+    if (!config.AMO_CLIENT_ID || !config.AMO_CLIENT_SECRET) {
       console.log('❌ AMO_CLIENT_ID или AMO_CLIENT_SECRET не заданы в .env');
       console.log('\nДля получения:');
       console.log('1. Войдите в amoCRM');
@@ -41,9 +42,9 @@ async function setupOAuth() {
     }
     
     console.log('Текущие настройки:');
-    console.log('Base URL:', config.amocrm.baseUrl);
-    console.log('Client ID:', config.amocrm.clientId);
-    console.log('Redirect URI:', config.amocrm.redirectUri || 'не задан');
+    console.log('Base URL:', config.AMO_BASE_URL);
+    console.log('Client ID:', config.AMO_CLIENT_ID);
+    console.log('Redirect URI:', config.AMO_REDIRECT_URI || 'не задан');
     console.log('');
     
     // Выбор метода получения токенов
@@ -63,13 +64,13 @@ async function setupOAuth() {
       console.log('\n📡 Обмен кода на токены...');
       
       const response = await axios.post(
-        `${config.amocrm.baseUrl}/oauth2/access_token`,
+        `${config.AMO_BASE_URL}/oauth2/access_token`,
         {
-          client_id: config.amocrm.clientId,
-          client_secret: config.amocrm.clientSecret,
+          client_id: config.AMO_CLIENT_ID,
+          client_secret: config.AMO_CLIENT_SECRET,
           grant_type: 'authorization_code',
           code: code.trim(),
-          redirect_uri: config.amocrm.redirectUri
+          redirect_uri: config.AMO_REDIRECT_URI
         },
         {
           headers: {
@@ -96,13 +97,13 @@ async function setupOAuth() {
       console.log('\n📡 Обновление токенов...');
       
       const response = await axios.post(
-        `${config.amocrm.baseUrl}/oauth2/access_token`,
+        `${config.AMO_BASE_URL}/oauth2/access_token`,
         {
-          client_id: config.amocrm.clientId,
-          client_secret: config.amocrm.clientSecret,
+          client_id: config.AMO_CLIENT_ID,
+          client_secret: config.AMO_CLIENT_SECRET,
           grant_type: 'refresh_token',
           refresh_token: refreshToken.trim(),
-          redirect_uri: config.amocrm.redirectUri
+          redirect_uri: config.AMO_REDIRECT_URI
         },
         {
           headers: {
@@ -131,8 +132,8 @@ async function setupOAuth() {
       console.log('2. Получите код авторизации:');
       console.log('   Откройте в браузере следующую ссылку:\n');
       
-      const authUrl = `${config.amocrm.baseUrl}/oauth?` + 
-        `client_id=${config.amocrm.clientId}&` +
+      const authUrl = `${config.AMO_BASE_URL}/oauth?` + 
+        `client_id=${config.AMO_CLIENT_ID}&` +
         `state=test&` +
         `mode=post_message`;
       
@@ -155,7 +156,8 @@ async function setupOAuth() {
     
   } catch (error) {
     console.error('\n❌ Ошибка:', error.message);
-    
+    logger.error({ error: error.message, details: error.response?.data }, 'Ошибка настройки OAuth amoCRM');
+
     if (error.response) {
       console.error('Статус:', error.response.status);
       console.error('Ответ:', JSON.stringify(error.response.data, null, 2));
