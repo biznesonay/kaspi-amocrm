@@ -136,7 +136,14 @@ export async function reconcileOrder(kaspiOrder, processedOrder) {
         processingTimeMs: 0,
         retryCount: processedOrder?.retry_count || 0
       });
-      
+
+      await repository.updateOrderStats({
+        success: true,
+        amount: Number(kaspiOrder.totalPrice) || 0,
+        reconcileUpdate: true,
+        leadCreated: true
+      });
+
       logger.info({ orderCode, leadId: lead.id }, '✅ Пропущенный заказ создан при сверке');
       stats.ordersCreated++;
       return;
@@ -197,18 +204,32 @@ export async function reconcileOrder(kaspiOrder, processedOrder) {
       processingTimeMs: 0,
       retryCount: 0
     });
-    
+
+    await repository.updateOrderStats({
+      success: true,
+      amount: Number(kaspiOrder.totalPrice) || 0,
+      reconcileUpdate: true
+    });
+
     logger.info({ orderCode, leadId }, '✅ Заказ обновлен при сверке');
     stats.ordersUpdated++;
-    
+
   } catch (error) {
     logger.error({
       orderCode,
       error: error.message
     }, '❌ Ошибка при сверке заказа');
-    
+
     stats.ordersFailed++;
-    
+
+    if (!config.DRY_RUN) {
+      await repository.updateOrderStats({
+        success: false,
+        amount: 0,
+        reconcileUpdate: false
+      });
+    }
+
     // Логируем ошибку в БД
     await repository.logError('RECONCILE_ERROR', error.message, {
       orderCode,
@@ -284,9 +305,18 @@ async function reconcile() {
       const updatedAt = new Date(order.updatedAt || order.createdAt);
       return updatedAt > max ? updatedAt : max;
     }, watermark);
-    
+
     await repository.updateReconcileWatermark(maxUpdatedAt);
-    
+
+    if (!config.DRY_RUN) {
+      const totalProcessed = parseInt(await repository.getMeta('total_orders_processed') || '0');
+      const totalFailed = parseInt(await repository.getMeta('total_orders_failed') || '0');
+
+      await repository.setMeta('total_orders_processed',
+        totalProcessed + stats.ordersCreated + stats.ordersUpdated);
+      await repository.setMeta('total_orders_failed', totalFailed + stats.ordersFailed);
+    }
+
     // Освобождаем лок
     await repository.releaseLock('reconcile');
     

@@ -141,7 +141,8 @@ async function getHealthStatus() {
         orders_failed: todayStats.orders_failed,
         leads_created: todayStats.leads_created,
         api_errors: todayStats.api_errors_kaspi + todayStats.api_errors_amocrm,
-        rate_limit_hits: todayStats.rate_limit_hits
+        rate_limit_hits: todayStats.rate_limit_hits,
+        reconcile_updates: todayStats.reconcile_updates
       };
 
       // Предупреждения по статистике
@@ -192,6 +193,8 @@ async function getHealthStatus() {
 
   return status;
 }
+
+export { getHealthStatus };
 
 /**
  * HTTP сервер
@@ -281,9 +284,11 @@ process.on('SIGINT', () => {
   });
 });
 
-// Запуск сервера
-server.listen(PORT, () => {
-  logger.info({ port: PORT }, 'Health check server started');
-  console.log(`Health check available at http://localhost:${PORT}/health`);
-  console.log(`Use Basic Auth: ${BASIC_USER}:${BASIC_PASS}`);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  // Запуск сервера
+  server.listen(PORT, () => {
+    logger.info({ port: PORT }, 'Health check server started');
+    console.log(`Health check available at http://localhost:${PORT}/health`);
+    console.log(`Use Basic Auth: ${BASIC_USER}:${BASIC_PASS}`);
+  });
+}
