@@ -116,3 +116,50 @@ test('fetchUpdatedKaspiOrders iterates through all pages', async () => {
     kaspiService.getOrdersUpdatedAfter = originalMethod;
   }
 });
+
+test('calculateChecksum is deterministic and reacts to item changes', () => {
+  const baseOrder = {
+    totalPrice: 300,
+    state: 'NEW',
+    items: [
+      {
+        sku: 'SKU-2',
+        quantity: 2,
+        price: 100,
+        details: {
+          color: 'red',
+          dimensions: { width: 10, height: 20 }
+        }
+      },
+      {
+        sku: 'SKU-1',
+        quantity: 1,
+        price: 200,
+        details: {
+          color: 'blue',
+          bundle: [
+            { sku: 'BUNDLE-1', quantity: 1 },
+            { sku: 'BUNDLE-2', quantity: 2 }
+          ]
+        }
+      }
+    ]
+  };
+
+  const checksumOriginal = kaspiService.calculateChecksum(baseOrder);
+
+  const reorder = JSON.parse(JSON.stringify(baseOrder));
+  reorder.items.reverse();
+  const checksumReordered = kaspiService.calculateChecksum(reorder);
+  assert.equal(checksumOriginal, checksumReordered, 'Reordering items should not affect checksum');
+
+  const quantityChanged = JSON.parse(JSON.stringify(baseOrder));
+  quantityChanged.items[0].quantity = 5;
+  const checksumQuantityChanged = kaspiService.calculateChecksum(quantityChanged);
+  assert.notEqual(checksumOriginal, checksumQuantityChanged, 'Changing quantity should change checksum');
+
+  const nestedChanged = JSON.parse(JSON.stringify(baseOrder));
+  nestedChanged.items[1].details.bundle[1].quantity = 3;
+  const checksumNestedChanged = kaspiService.calculateChecksum(nestedChanged);
+  assert.notEqual(checksumOriginal, checksumNestedChanged, 'Changing nested item fields should change checksum');
+});
