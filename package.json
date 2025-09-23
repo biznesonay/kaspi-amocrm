@@ -1,0 +1,43 @@
+{
+  "name": "kaspi-amocrm-integrator",
+  "version": "1.0.0",
+  "description": "Автоматический перенос заказов из Kaspi в amoCRM через cron",
+  "main": "src/poll-and-create.js",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "poll": "node src/poll-and-create.js",
+    "reconcile": "node src/reconcile.js",
+    "migrate:sqlite": "node src/db/migrate.js sqlite",
+    "migrate:postgres": "node src/db/migrate.js postgres",
+    "test": "node --test",
+    "dry-run:poll": "DRY_RUN=true node src/poll-and-create.js",
+    "dry-run:reconcile": "DRY_RUN=true node src/reconcile.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "knex": "^3.1.0",
+    "sqlite3": "^5.1.7",
+    "pg": "^8.12.0",
+    "libphonenumber-js": "^1.11.4",
+    "pino": "^9.3.0",
+    "pino-pretty": "^11.2.0",
+    "dotenv": "^16.4.5",
+    "zod": "^3.23.8",
+    "nodemailer": "^6.9.13"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0"
+  },
+  "keywords": [
+    "kaspi",
+    "amocrm",
+    "integration",
+    "cron",
+    "e-commerce"
+  ],
+  "author": "",
+  "license": "MIT"
+}
