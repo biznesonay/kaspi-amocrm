@@ -305,3 +305,210 @@ class Repository {
 // Создаем синглтон
 const repository = new Repository();
 export default repository;
+
+// ========== ERROR LOG METHODS ==========
+
+/**
+ * Логирование ошибки в БД
+ * @param {Object} error - Объект ошибки
+ * @returns {Promise<void>}
+ */
+async logError(error) {
+  const errorData = {
+    order_code: error.orderCode || null,
+    error_type: error.type || 'unknown',
+    error_message: error.message || 'Unknown error',
+    error_details: error.details ? JSON.stringify(error.details) : null,
+    stack_trace: error.stack || null,
+    retry_attempt: error.retryAttempt || 0
+  };
+
+  if (this.dbClient === 'postgres') {
+    errorData.created_at_utc = new Date().toISOString();
+    await this.db('error_log').insert(errorData);
+  } else {
+    // SQLite - created_at_utc устанавливается автоматически через DEFAULT
+    await this.db('error_log').insert(errorData);
+  }
+
+  this.logger.debug({ errorData }, 'Error logged to database');
+}
+
+/**
+ * Получение последних ошибок
+ * @param {number} limit - Количество записей
+ * @returns {Promise<Array>}
+ */
+async getRecentErrors(limit = 10) {
+  return await this.db('error_log')
+    .orderBy('created_at_utc', 'desc')
+    .limit(limit);
+}
+
+/**
+ * Получение ошибок по заказу
+ * @param {string} orderCode - Код заказа
+ * @returns {Promise<Array>}
+ */
+async getOrderErrors(orderCode) {
+  return await this.db('error_log')
+    .where('order_code', orderCode)
+    .orderBy('created_at_utc', 'desc');
+}
+
+/**
+ * Очистка старых ошибок
+ * @param {number} daysToKeep - Сколько дней хранить
+ * @returns {Promise<number>} Количество удаленных записей
+ */
+async cleanOldErrors(daysToKeep = 30) {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+  
+  const deleted = await this.db('error_log')
+    .where('created_at_utc', '<', cutoffDate.toISOString())
+    .delete();
+    
+  this.logger.info({ deleted, daysToKeep }, 'Old errors cleaned');
+  return deleted;
+}
+
+// ========== DAILY STATS METHODS ==========
+
+/**
+ * Получение или создание статистики за день
+ * @param {string} date - Дата в формате YYYY-MM-DD
+ * @returns {Promise<Object>}
+ */
+async getDailyStats(date) {
+  const stats = await this.db('daily_stats')
+    .where('date', date)
+    .first();
+    
+  if (!stats) {
+    // Создаем пустую запись для сегодня
+    const newStats = {
+      date,
+      orders_processed: 0,
+      orders_failed: 0,
+      contacts_created: 0,
+      leads_created: 0,
+      total_processing_time_ms: 0,
+      avg_processing_time_ms: 0,
+      total_amount: 0,
+      api_errors_kaspi: 0,
+      api_errors_amocrm: 0,
+      rate_limit_hits: 0,
+      reconcile_updates: 0
+    };
+    
+    if (this.dbClient === 'postgres') {
+      newStats.created_at_utc = new Date().toISOString();
+      newStats.updated_at_utc = new Date().toISOString();
+    }
+    
+    await this.db('daily_stats').insert(newStats);
+    return newStats;
+  }
+  
+  return stats;
+}
+
+/**
+ * Инкремент счетчика в daily_stats
+ * @param {string} date - Дата YYYY-MM-DD
+ * @param {string} field - Название поля
+ * @param {number} increment - На сколько увеличить
+ * @returns {Promise<void>}
+ */
+async incrementDailyStat(date, field, increment = 1) {
+  // Убеждаемся, что запись существует
+  await this.getDailyStats(date);
+  
+  // Инкрементим поле
+  await this.db('daily_stats')
+    .where('date', date)
+    .increment(field, increment);
+    
+  // Обновляем updated_at_utc для PostgreSQL
+  if (this.dbClient === 'postgres') {
+    await this.db('daily_stats')
+      .where('date', date)
+      .update({ updated_at_utc: new Date().toISOString() });
+  }
+}
+
+/**
+ * Обновление статистики после обработки заказа
+ * @param {Object} stats - Объект со статистикой
+ */
+async updateOrderStats(stats) {
+  const date = new Date().toISOString().split('T')[0];
+  
+  // Получаем текущую статистику
+  const currentStats = await this.getDailyStats(date);
+  
+  // Вычисляем новые значения
+  const totalProcessed = currentStats.orders_processed + (stats.success ? 1 : 0);
+  const totalFailed = currentStats.orders_failed + (stats.success ? 0 : 1);
+  const totalTime = currentStats.total_processing_time_ms + (stats.processingTime || 0);
+  
+  const updates = {
+    orders_processed: totalProcessed,
+    orders_failed: totalFailed,
+    total_processing_time_ms: totalTime,
+    avg_processing_time_ms: totalProcessed > 0 ? Math.round(totalTime / totalProcessed) : 0
+  };
+  
+  // Добавляем другие счетчики если есть
+  if (stats.contactCreated) updates.contacts_created = currentStats.contacts_created + 1;
+  if (stats.leadCreated) updates.leads_created = currentStats.leads_created + 1;
+  if (stats.amount) updates.total_amount = currentStats.total_amount + stats.amount;
+  if (stats.kaspiError) updates.api_errors_kaspi = currentStats.api_errors_kaspi + 1;
+  if (stats.amocrmError) updates.api_errors_amocrm = currentStats.api_errors_amocrm + 1;
+  if (stats.rateLimitHit) updates.rate_limit_hits = currentStats.rate_limit_hits + 1;
+  if (stats.reconcileUpdate) updates.reconcile_updates = currentStats.reconcile_updates + 1;
+  
+  // Обновляем БД
+  if (this.dbClient === 'postgres') {
+    updates.updated_at_utc = new Date().toISOString();
+  }
+  
+  await this.db('daily_stats')
+    .where('date', date)
+    .update(updates);
+    
+  this.logger.debug({ date, updates }, 'Daily stats updated');
+}
+
+/**
+ * Получение статистики за период
+ * @param {string} startDate - Начальная дата YYYY-MM-DD
+ * @param {string} endDate - Конечная дата YYYY-MM-DD
+ * @returns {Promise<Array>}
+ */
+async getStatsRange(startDate, endDate) {
+  return await this.db('daily_stats')
+    .whereBetween('date', [startDate, endDate])
+    .orderBy('date', 'desc');
+}
+
+/**
+ * Получение суммарной статистики
+ * @returns {Promise<Object>}
+ */
+async getSummaryStats() {
+  const result = await this.db('daily_stats')
+    .sum('orders_processed as total_orders_processed')
+    .sum('orders_failed as total_orders_failed')
+    .sum('contacts_created as total_contacts_created')
+    .sum('leads_created as total_leads_created')
+    .sum('total_amount as total_amount')
+    .sum('api_errors_kaspi as total_api_errors_kaspi')
+    .sum('api_errors_amocrm as total_api_errors_amocrm')
+    .sum('rate_limit_hits as total_rate_limit_hits')
+    .avg('avg_processing_time_ms as avg_processing_time_ms')
+    .first();
+    
+  return result;
+}

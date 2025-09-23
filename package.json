@@ -8,13 +8,36 @@
     "node": ">=20.0.0"
   },
   "scripts": {
+    "// Основные скрипты": "",
     "poll": "node src/poll-and-create.js",
     "reconcile": "node src/reconcile.js",
-    "migrate:sqlite": "node src/db/migrate.js sqlite",
-    "migrate:postgres": "node src/db/migrate.js postgres",
-    "test": "node --test",
+    "health": "node src/health-check.js",
+    
+    "// Миграции": "",
+    "migrate:sqlite": "node src/db/migrate.js",
+    "migrate:postgres": "DB_CLIENT=postgres node src/db/migrate.js",
+    "migrate": "npm run migrate:sqlite",
+    
+    "// Helpers и утилиты": "",
+    "get:amocrm-ids": "node src/helpers/get-amocrm-ids.js",
+    "test:kaspi": "node src/helpers/test-kaspi-api.js",
+    "clean:errors": "node -e \"import('./src/db/repository.js').then(r => r.repository.cleanOldErrors(30))\"",
+    "stats:summary": "node -e \"import('./src/db/repository.js').then(r => r.repository.getSummaryStats().then(console.log))\"",
+    
+    "// Тестовые запуски (DRY RUN)": "",
     "dry-run:poll": "DRY_RUN=true node src/poll-and-create.js",
-    "dry-run:reconcile": "DRY_RUN=true node src/reconcile.js"
+    "dry-run:reconcile": "DRY_RUN=true node src/reconcile.js",
+    "test:connection": "npm run test:kaspi && npm run get:amocrm-ids",
+    
+    "// Разработка и отладка": "",
+    "dev:poll": "NODE_ENV=development node --inspect src/poll-and-create.js",
+    "dev:reconcile": "NODE_ENV=development node --inspect src/reconcile.js",
+    "logs:tail": "tail -f logs/integrator.log | npx pino-pretty",
+    
+    "// Установка и настройка": "",
+    "setup": "npm ci && npm run migrate",
+    "setup:postgres": "npm ci && npm run migrate:postgres",
+    "postinstall": "echo '✅ Установка завершена. Не забудьте настроить .env и выполнить миграции: npm run migrate'"
   },
   "dependencies": {
     "axios": "^1.7.2",
