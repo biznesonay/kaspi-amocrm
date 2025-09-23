@@ -54,6 +54,7 @@ test('повторная сверка заменяет старые позици
   const originalUpdateLead = amoCRMService.updateLead;
   const originalAddNoteToLead = amoCRMService.addNoteToLead;
   const originalSaveProcessedOrder = repository.saveProcessedOrder;
+  const originalUpdateOrderStats = repository.updateOrderStats;
 
   amoCRMService.getLeadById = async (requestedLeadId) => {
     assert.equal(requestedLeadId, leadId);
@@ -110,6 +111,10 @@ test('повторная сверка заменяет старые позици
 
   repository.saveProcessedOrder = async (payload) => {
     savedOrder = payload;
+  };
+
+  repository.updateOrderStats = async () => {
+    // Статистика не нужна для целей теста
   };
 
   const kaspiOrder = {
@@ -189,6 +194,7 @@ test('повторная сверка заменяет старые позици
     amoCRMService.updateLead = originalUpdateLead;
     amoCRMService.addNoteToLead = originalAddNoteToLead;
     repository.saveProcessedOrder = originalSaveProcessedOrder;
+    repository.updateOrderStats = originalUpdateOrderStats;
   }
 });
 
