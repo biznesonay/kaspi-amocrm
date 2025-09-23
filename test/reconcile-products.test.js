@@ -26,8 +26,12 @@ const repositoryModule = await import('../src/db/repository.js');
 const repository = repositoryModule.default;
 const dbModule = await import('../src/config/database.js');
 const db = dbModule.default;
+const migrateModule = await import('../src/db/migrate.js');
+const runMigrations = migrateModule.default;
 const reconcileModule = await import('../src/reconcile.js');
 const { reconcileOrder } = reconcileModule;
+
+await runMigrations();
 
 test('повторная сверка заменяет старые позиции актуальными данными', async () => {
   const leadId = 555555;
