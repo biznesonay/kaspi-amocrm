@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import db from '../config/database.js';
@@ -16,40 +16,47 @@ async function runMigrations() {
     // Путь к папке с миграциями
     const migrationsPath = join(__dirname, '../../migrations', dbType);
     
-    // Читаем SQL файл
-    const sqlPath = join(migrationsPath, '001_initial.sql');
-    const sql = readFileSync(sqlPath, 'utf-8');
-    
-    // Разбиваем на отдельные команды для SQLite
-    // (SQLite не поддерживает множественные statements в одном вызове через Knex)
-    if (dbType === 'sqlite') {
-      const sanitizedSql = sql
-        .split('\n')
-        .map(line => {
-          const trimmedLine = line.trimStart();
-          return trimmedLine.startsWith('--') ? '' : line;
-        })
-        .join('\n');
+    const migrationFiles = readdirSync(migrationsPath)
+      .filter(file => file.endsWith('.sql'))
+      .sort();
 
-      const statements = sanitizedSql
-        .split(';')
-        .map(s => s.trim())
-        .filter(s => s.length > 0);
-      
-      for (const statement of statements) {
-        try {
-          await db.raw(statement);
-          logger.debug({ statement: statement.substring(0, 50) + '...' }, 'Выполнен SQL statement');
-        } catch (error) {
-          // Игнорируем ошибки "already exists" для идемпотентности
-          if (!error.message.includes('already exists')) {
-            throw error;
+    for (const file of migrationFiles) {
+      const sqlPath = join(migrationsPath, file);
+      const sql = readFileSync(sqlPath, 'utf-8');
+      logger.info({ file }, 'Выполнение миграции');
+
+      // Разбиваем на отдельные команды для SQLite
+      // (SQLite не поддерживает множественные statements в одном вызове через Knex)
+      if (dbType === 'sqlite') {
+        const sanitizedSql = sql
+          .split('\n')
+          .map(line => {
+            const trimmedLine = line.trimStart();
+            return trimmedLine.startsWith('--') ? '' : line;
+          })
+          .join('\n');
+
+        const statements = sanitizedSql
+          .split(';')
+          .map(s => s.trim())
+          .filter(s => s.length > 0);
+
+        for (const statement of statements) {
+          try {
+            await db.raw(statement);
+            logger.debug({ file, statement: statement.substring(0, 50) + '...' }, 'Выполнен SQL statement');
+          } catch (error) {
+            const message = error.message || '';
+            // Игнорируем ошибки "already exists" и "duplicate column" для идемпотентности
+            if (!message.includes('already exists') && !message.includes('duplicate column name')) {
+              throw error;
+            }
           }
         }
+      } else {
+        // PostgreSQL поддерживает множественные statements
+        await db.raw(sql);
       }
-    } else {
-      // PostgreSQL поддерживает множественные statements
-      await db.raw(sql);
     }
     
     // Вставляем токены из env если они есть и еще не сохранены
