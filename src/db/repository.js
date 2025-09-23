@@ -300,14 +300,17 @@ async logError(errorTypeOrObject, errorMessage, errorDetails = null, orderCode =
       : typeof errorDetails === 'string'
         ? errorDetails
         : JSON.stringify(errorDetails);
-        
-      await db('error_log').insert({
+
+    const timestampColumn = await this._getErrorLogTimestampColumn();
+    const data = {
       error_type: errorTypeOrObject || 'unknown',
       error_message: message,
       error_details: detailsValue,
-      order_code: orderCode ?? null,
-      occurred_at_utc: nowUtc()
-    });
+      order_code: orderCode ?? null
+    };
+    data[timestampColumn] = nowUtc();
+
+    await db('error_log').insert(data);
     
     // Также обновляем последнюю ошибку в meta
     await this.setMeta('last_error_utc', new Date().toISOString());
