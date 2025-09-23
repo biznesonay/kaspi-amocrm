@@ -12,16 +12,16 @@ const KaspiOrderSchema = z.object({
   totalPrice: z.number(),
   state: z.string(),
   createdAt: z.string(),
-  updatedAt: z.string().optional(),
+  updatedAt: z.string().nullish(),
   
   buyer: z.object({
-    firstName: z.string().optional(),
-    lastName: z.string().optional(),
-    middleName: z.string().optional(),
-    phone: z.string().optional(),
-    mobilePhone: z.string().optional(),
-    email: z.string().optional(),
-  }).optional(),
+    firstName: z.string().nullish(),
+    lastName: z.string().nullish(),
+    middleName: z.string().nullish(),
+    phone: z.string().nullish(),
+    mobilePhone: z.string().nullish(),
+    email: z.string().nullish(),
+  }).nullish(),
   
   items: z.array(z.object({
     sku: z.string(),
@@ -32,20 +32,20 @@ const KaspiOrderSchema = z.object({
   })).optional().default([]),
   
   delivery: z.object({
-    address: z.string().optional(),
-    city: z.string().optional(),
-    region: z.string().optional(),
-  }).optional(),
+    address: z.string().nullish(),
+    city: z.string().nullish(),
+    region: z.string().nullish(),
+  }).nullish(),
   
   pickup: z.object({
-    address: z.string().optional(),
-    pointName: z.string().optional(),
-  }).optional(),
+    address: z.string().nullish(),
+    pointName: z.string().nullish(),
+  }).nullish(),
   
   payment: z.object({
-    type: z.string().optional(),
-    status: z.string().optional(),
-  }).optional(),
+    type: z.string().nullish(),
+    status: z.string().nullish(),
+  }).nullish(),
 });
 
 const KaspiOrdersResponseSchema = z.object({
