@@ -152,16 +152,21 @@ class AlertService {
    * Форматирует сообщение для Telegram
    */
   formatTelegramMessage(level, title, message, details) {
-    let text = `<b>${level}</b>\n\n`;
-    text += `<b>${title}</b>\n`;
-    text += `${message}\n`;
-    
+    const escapedLevel = this.escapeHtml(level);
+    const escapedTitle = this.escapeHtml(title);
+    const escapedMessage = this.escapeHtml(message);
+
+    let text = `<b>${escapedLevel}</b>\n\n`;
+    text += `<b>${escapedTitle}</b>\n`;
+    text += `${escapedMessage}\n`;
+
     if (details && Object.keys(details).length > 0) {
       text += '\n<b>Детали:</b>\n';
       for (const [key, value] of Object.entries(details)) {
         // Маскируем чувствительные данные
-        const maskedValue = this.maskSensitiveData(key, value);
-        text += `• ${key}: <code>${maskedValue}</code>\n`;
+        const escapedKey = this.escapeHtml(key);
+        const maskedValue = this.escapeHtml(this.maskSensitiveData(key, value));
+        text += `• ${escapedKey}: <code>${maskedValue}</code>\n`;
       }
     }
     
@@ -174,21 +179,26 @@ class AlertService {
    * Форматирует сообщение для Email
    */
   formatEmailMessage(level, title, message, details) {
+    const escapedLevel = this.escapeHtml(level);
+    const escapedTitle = this.escapeHtml(title);
+    const escapedMessage = this.escapeHtml(message);
+
     let html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px;">
-        <div style="background-color: ${level === 'CRITICAL' ? '#dc3545' : '#ffc107'}; 
+        <div style="background-color: ${level === 'CRITICAL' ? '#dc3545' : '#ffc107'};
                     color: white; padding: 10px; border-radius: 5px 5px 0 0;">
-          <h2 style="margin: 0;">${level}: ${title}</h2>
+          <h2 style="margin: 0;">${escapedLevel}: ${escapedTitle}</h2>
         </div>
         <div style="border: 1px solid #ddd; padding: 20px; border-radius: 0 0 5px 5px;">
-          <p style="font-size: 16px;">${message}</p>
+          <p style="font-size: 16px;">${escapedMessage}</p>
     `;
-    
+
     if (details && Object.keys(details).length > 0) {
       html += '<h3>Детали:</h3><ul>';
       for (const [key, value] of Object.entries(details)) {
-        const maskedValue = this.maskSensitiveData(key, value);
-        html += `<li><strong>${key}:</strong> ${maskedValue}</li>`;
+        const escapedKey = this.escapeHtml(key);
+        const maskedValue = this.escapeHtml(this.maskSensitiveData(key, value));
+        html += `<li><strong>${escapedKey}:</strong> ${maskedValue}</li>`;
       }
       html += '</ul>';
     }
@@ -213,7 +223,7 @@ class AlertService {
     if (typeof value !== 'string') {
       return String(value);
     }
-    
+
     const lowerKey = key.toLowerCase();
     
     if (lowerKey.includes('token') || lowerKey.includes('secret')) {
@@ -230,8 +240,24 @@ class AlertService {
         return local.substring(0, 2) + '***@' + domain;
       }
     }
-    
+
     return value;
+  }
+
+  /**
+   * Экранирует HTML-спецсимволы
+   */
+  escapeHtml(value) {
+    if (value === null || value === undefined) {
+      return '';
+    }
+
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
   
   /**
