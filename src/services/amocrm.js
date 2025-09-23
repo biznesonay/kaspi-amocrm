@@ -311,13 +311,41 @@ class AmoCRMService {
       customFields = {},
       tags = ['kaspi']
     } = data;
-    
+
+    const safeItems = Array.isArray(items) ? items : [];
+
+    let fallbackCatalogId = -1;
+    if (!config.USE_FREE_POSITIONS) {
+      const itemWithCatalog = safeItems.find(item =>
+        item?.catalog_id != null || item?.catalogId != null
+      );
+
+      if (itemWithCatalog) {
+        fallbackCatalogId = itemWithCatalog.catalog_id ?? itemWithCatalog.catalogId ?? fallbackCatalogId;
+      } else if (safeItems.length > 0) {
+        logger.warn(
+          'USE_FREE_POSITIONS отключен, но позиции без catalog_id; используем свободные позиции (catalog_id = -1)'
+        );
+      }
+    }
+
     // Формируем позиции товаров
-    const catalogElements = items.map(item => ({
-      name: item.name || item.sku,
-      quantity: item.quantity || 1,
-      price: item.price || 0
-    }));
+    const catalogElements = safeItems.map(item => {
+      const rawQuantity = item?.quantity ?? 1;
+      const quantityNumber = Number(rawQuantity);
+      const quantity = Number.isFinite(quantityNumber) && quantityNumber > 0 ? quantityNumber : 1;
+
+      const rawPrice = item?.price ?? 0;
+      const priceNumber = Number(rawPrice);
+      const priceValue = Number.isFinite(priceNumber) ? Math.round(priceNumber) : 0;
+
+      return {
+        catalog_id: item?.catalog_id ?? item?.catalogId ?? fallbackCatalogId,
+        name: item?.name || item?.sku,
+        quantity,
+        price: priceValue
+      };
+    });
     
     // Основная структура сделки
     const leadData = {
@@ -344,7 +372,7 @@ class AmoCRMService {
       ...leadData,
       _embedded: {
         ...leadData._embedded,
-        catalog_elements: config.USE_FREE_POSITIONS ? catalogElements : undefined
+        ...(catalogElements.length > 0 ? { catalog_elements: catalogElements } : {})
       }
     }];
     
@@ -358,7 +386,7 @@ class AmoCRMService {
           leadId: lead.id, 
           name, 
           price,
-          itemsCount: items.length 
+          itemsCount: safeItems.length
         }, 'Создана сделка с позициями');
         
         // Добавляем заметку
