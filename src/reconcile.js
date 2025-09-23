@@ -73,7 +73,7 @@ export async function fetchUpdatedKaspiOrders(fromDate, params = {}) {
 /**
  * Сверяет и обновляет один заказ
  */
-async function reconcileOrder(kaspiOrder, processedOrder) {
+export async function reconcileOrder(kaspiOrder, processedOrder) {
   const orderCode = kaspiOrder.code;
   
   try {
@@ -177,9 +177,8 @@ async function reconcileOrder(kaspiOrder, processedOrder) {
     
     // Обновляем позиции если изменились
     if (kaspiOrder.items && kaspiOrder.items.length > 0) {
-      // TODO: Реализовать обновление позиций
-      // await amoCRMService.updateLeadProducts(leadId, kaspiOrder.items);
-      
+      await amoCRMService.updateLeadProducts(leadId, kaspiOrder.items);
+
       // Добавляем заметку об изменении
       const itemsText = kaspiService.formatItemsForNote(kaspiOrder.items);
       const updateNote = `📝 Обновлено при сверке ${new Date().toLocaleString('ru-RU', { timeZone: config.TIMEZONE })}\n` +
