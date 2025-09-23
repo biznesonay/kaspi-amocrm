@@ -17,6 +17,10 @@ class Repository {
     return this._errorLogTimestampColumn;
   }
 
+  async getErrorLogTimestampColumn() {
+    return this._getErrorLogTimestampColumn();
+  }
+
   async _getDailyStatsColumns() {
     if (!this._dailyStatsColumns) {
       this._dailyStatsColumns = await db('daily_stats').columnInfo();

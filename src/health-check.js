@@ -31,6 +31,37 @@ function checkAuth(req) {
   return user === BASIC_USER && pass === BASIC_PASS;
 }
 
+function normalizeErrorTimestamp(value) {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value?.toISOString === 'function') {
+    try {
+      return value.toISOString();
+    } catch (error) {
+      // ignore and fall back to generic parsing
+    }
+  }
+
+  const parsedDate = new Date(value);
+
+  if (!Number.isNaN(parsedDate.getTime())) {
+    return parsedDate.toISOString();
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  return null;
+}
+
 /**
  * Получение статуса системы
  */
@@ -126,12 +157,23 @@ async function getHealthStatus() {
     // Проверка последних ошибок
     const recentErrors = await repository.getRecentErrors(5);
     if (recentErrors && recentErrors.length > 0) {
-      status.checks.recentErrors = recentErrors.map(err => ({
-        type: err.error_type,
-        message: err.error_message,
-        order_code: err.order_code ? '***' + err.order_code.slice(-4) : null,
-        timestamp: err.created_at_utc
-      }));
+      let errorTimestampColumn;
+      if (typeof repository.getErrorLogTimestampColumn === 'function') {
+        errorTimestampColumn = await repository.getErrorLogTimestampColumn();
+      } else if (typeof repository._getErrorLogTimestampColumn === 'function') {
+        errorTimestampColumn = await repository._getErrorLogTimestampColumn();
+      }
+
+      status.checks.recentErrors = recentErrors.map(err => {
+        const timestampValue = errorTimestampColumn ? err[errorTimestampColumn] : (err.created_at_utc ?? err.occurred_at_utc ?? null);
+
+        return {
+          type: err.error_type,
+          message: err.error_message,
+          order_code: err.order_code ? '***' + err.order_code.slice(-4) : null,
+          timestamp: normalizeErrorTimestamp(timestampValue)
+        };
+      });
     }
 
     // Итоговый статус
