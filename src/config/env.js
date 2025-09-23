@@ -12,6 +12,7 @@ dotenv.config({ path: join(__dirname, '../../.env') });
 // Схема валидации переменных окружения
 const envSchema = z.object({
   // Kaspi
+  KASPI_BASE_URL: z.string().url().default('https://api.kaspi.kz/shop/api'),
   KASPI_API_TOKEN: z.string().min(1),
   KASPI_ALLOWED_STATES: z.string().min(1),
   KASPI_PAGE_SIZE: z.coerce.number().positive().default(100),
@@ -94,4 +95,4 @@ if (!config.HAS_ALERT_CHANNEL && !config.DRY_RUN) {
 }
 
 // Экспортируем конфигурацию
-export default config; s
+export default config;

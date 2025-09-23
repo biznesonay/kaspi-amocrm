@@ -6,11 +6,11 @@
  */
 
 import http from 'http';
-import { URL } from 'url';
-import { config } from './config/env.js';
-import { db } from './config/database.js';
-import { repository } from './db/repository.js';
-import { logger } from './utils/logger.js';
+import URL from 'url';
+import config from './config/env.js';
+import db from './config/database.js';
+import repository from './db/repository.js';
+import logger from './utils/logger.js';
 
 const PORT = process.env.HEALTH_CHECK_PORT || 3000;
 const BASIC_USER = process.env.ADMIN_BASIC_USER || 'admin';
@@ -38,7 +38,7 @@ async function getHealthStatus() {
   const status = {
     status: 'ok',
     timestamp: new Date().toISOString(),
-    timezone: config.app.timezone,
+    timezone: config.TIMEZONE,
     checks: {
       database: false,
       heartbeat: false,
@@ -67,9 +67,9 @@ async function getHealthStatus() {
         ageMinutes
       };
 
-      if (ageMinutes > config.alerts.heartbeatMinutes) {
+      if (ageMinutes > config.ALERT_HEARTBEAT_MINUTES) {
         status.status = 'warning';
-        status.warnings.push(`Last poll was ${ageMinutes} minutes ago (threshold: ${config.alerts.heartbeatMinutes})`);
+        status.warnings.push(`Last poll was ${ageMinutes} minutes ago (threshold: ${config.ALERT_HEARTBEAT_MINUTES})`);
       } else {
         status.checks.heartbeat = true;
       }
@@ -95,7 +95,7 @@ async function getHealthStatus() {
     const failures = await repository.getMeta('consecutive_failures');
     status.checks.consecutiveFailures = parseInt(failures || '0');
     
-    if (status.checks.consecutiveFailures >= config.alerts.failStreak) {
+    if (status.checks.consecutiveFailures >= config.ALERT_FAIL_STREAK) {
       status.status = 'error';
       status.errors.push(`Too many consecutive failures: ${status.checks.consecutiveFailures}`);
     }

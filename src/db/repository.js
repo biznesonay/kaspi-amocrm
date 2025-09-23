@@ -3,8 +3,46 @@ import config from '../config/env.js';
 import logger from '../utils/logger.js';
 
 class Repository {
-  // === Работа с локами ===
-  
+  constructor() {
+    this._errorLogTimestampColumn = null;
+    this._dailyStatsColumns = null;
+  }
+
+  async _getErrorLogTimestampColumn() {
+    if (!this._errorLogTimestampColumn) {
+      const columns = await db('error_log').columnInfo();
+      this._errorLogTimestampColumn = columns.created_at_utc ? 'created_at_utc' : 'occurred_at_utc';
+    }
+
+    return this._errorLogTimestampColumn;
+  }
+
+  async _getDailyStatsColumns() {
+    if (!this._dailyStatsColumns) {
+      this._dailyStatsColumns = await db('daily_stats').columnInfo();
+    }
+
+    return this._dailyStatsColumns;
+  }
+
+  async _hasDailyStatsColumn(column) {
+    const columns = await this._getDailyStatsColumns();
+    return Object.prototype.hasOwnProperty.call(columns, column);
+  }
+
+  _normalizeDateInput(date) {
+    if (!date) {
+      return new Date().toISOString().split('T')[0];
+    }
+
+    if (typeof date === 'string') {
+      return date;
+    }
+
+    const parsedDate = date instanceof Date ? date : new Date(date);
+    return parsedDate.toISOString().split('T')[0];
+  }
+
   async acquireLock(name, durationMinutes = 5) {
     const now = new Date();
     const lockedUntil = new Date(now.getTime() + durationMinutes * 60000);
@@ -210,27 +248,186 @@ class Repository {
   
   // === Работа с ошибками ===
   
-  async logError(errorType, errorMessage, errorDetails = null, orderCode = null) {
-    await db('error_log').insert({
-      error_type: errorType,
-      error_message: errorMessage.substring(0, 500),
-      error_details: errorDetails ? JSON.stringify(errorDetails) : null,
-      order_code: orderCode,
+async logError(errorTypeOrObject, errorMessage, errorDetails = null, orderCode = null) {
+    if (errorTypeOrObject && typeof errorTypeOrObject === 'object' && !Array.isArray(errorTypeOrObject)) {
+      const error = errorTypeOrObject;
+      const details = {};
+
+      if (error.details) {
+        if (typeof error.details === 'object' && !Array.isArray(error.details)) {
+          Object.assign(details, error.details);
+        } else {
+          details.details = error.details;
+        }
+      }
+
+      if (errorDetails) {
+        if (typeof errorDetails === 'object' && !Array.isArray(errorDetails)) {
+          Object.assign(details, errorDetails);
+        } else {
+          details.additionalDetails = errorDetails;
+        }
+      }
+
+      if (error.stack) {
+        details.stack = error.stack;
+      }
+
+      if (typeof error.retryAttempt !== 'undefined') {
+        details.retryAttempt = error.retryAttempt;
+      }
+
+      const mergedDetails = Object.keys(details).length > 0 ? details : null;
+
+      return this.logError(
+        error.type || 'unknown',
+        error.message || 'Unknown error',
+        mergedDetails,
+        error.orderCode ?? orderCode ?? null
+      );
+    }
+
+    const fullMessage = errorMessage || 'Unknown error';
+    const message = fullMessage.substring(0, 500);
+    const detailsValue = errorDetails == null
+      ? null
+      : typeof errorDetails === 'string'
+        ? errorDetails
+        : JSON.stringify(errorDetails);
+        
+      await db('error_log').insert({
+      error_type: errorTypeOrObject || 'unknown',
+      error_message: message,
+      error_details: detailsValue,
+      order_code: orderCode ?? null,
       occurred_at_utc: nowUtc()
     });
     
     // Также обновляем последнюю ошибку в meta
     await this.setMeta('last_error_utc', new Date().toISOString());
-    await this.setMeta('last_error_message', errorMessage.substring(0, 200));
+    await this.setMeta('last_error_message', fullMessage.substring(0, 200));
   }
   
   async getRecentErrors(limit = 10) {
-    return await db('error_log')
-      .orderBy('occurred_at_utc', 'desc')
+    const timestampColumn = await this._getErrorLogTimestampColumn();
+    return db('error_log')
+      .orderBy(timestampColumn, 'desc')
       .limit(limit);
   }
   
+  async getOrderErrors(orderCode) {
+    const timestampColumn = await this._getErrorLogTimestampColumn();
+    return db('error_log')
+      .where('order_code', orderCode)
+      .orderBy(timestampColumn, 'desc');
+  }
+
+  async cleanOldErrors(daysToKeep = 30) {
+    const timestampColumn = await this._getErrorLogTimestampColumn();
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+
+    const deleted = await db('error_log')
+      .where(timestampColumn, '<', toDbDate(cutoffDate))
+      .delete();
+
+    logger.info({ deleted, daysToKeep }, 'Старые ошибки очищены в error_log');
+    return deleted;
+  }
+
   // === Статистика ===
+
+   async getDailyStats(date) {
+    const dateStr = this._normalizeDateInput(date);
+    const columns = await this._getDailyStatsColumns();
+
+    let stats = await db('daily_stats').where('date', dateStr).first();
+
+    if (!stats) {
+      const baseStats = { date: dateStr };
+      const zeroColumns = [
+        'orders_processed',
+        'orders_failed',
+        'contacts_created',
+        'leads_created',
+        'total_processing_time_ms',
+        'avg_processing_time_ms',
+        'total_amount',
+        'api_errors_kaspi',
+        'api_errors_amocrm',
+        'rate_limit_hits',
+        'reconcile_updates'
+      ];
+
+      for (const column of zeroColumns) {
+        if (columns[column]) {
+          baseStats[column] = 0;
+        }
+      }
+
+      if (columns.created_at_utc) {
+        baseStats.created_at_utc = nowUtc();
+      }
+
+      if (columns.updated_at_utc) {
+        baseStats.updated_at_utc = nowUtc();
+      }
+
+      await db('daily_stats').insert(baseStats);
+      stats = await db('daily_stats').where('date', dateStr).first();
+    }
+
+    if (!stats) {
+      return null;
+    }
+
+    const numericFields = [
+      'orders_processed',
+      'orders_failed',
+      'contacts_created',
+      'leads_created',
+      'total_processing_time_ms',
+      'avg_processing_time_ms',
+      'total_amount',
+      'api_errors_kaspi',
+      'api_errors_amocrm',
+      'rate_limit_hits',
+      'reconcile_updates'
+    ];
+
+    for (const field of numericFields) {
+      if (stats[field] == null) {
+        stats[field] = 0;
+      } else {
+        const numericValue = Number(stats[field]);
+        stats[field] = Number.isNaN(numericValue) ? 0 : numericValue;
+      }
+    }
+
+    return stats;
+  }
+
+  async incrementDailyStat(date, field, increment = 1) {
+    const dateStr = this._normalizeDateInput(date);
+    const columns = await this._getDailyStatsColumns();
+
+    if (!columns[field]) {
+      logger.warn({ field }, 'Попытка обновить несуществующую колонку daily_stats');
+      return;
+    }
+
+    await this.getDailyStats(dateStr);
+
+    await db('daily_stats')
+      .where('date', dateStr)
+      .increment(field, increment);
+
+    if (columns.updated_at_utc) {
+      await db('daily_stats')
+        .where('date', dateStr)
+        .update({ updated_at_utc: nowUtc() });
+    }
+  }
   
   async updateDailyStats(date, stats) {
     const dateStr = date.toISOString().split('T')[0];
@@ -284,6 +481,102 @@ class Repository {
       }
     }
   }
+
+  async updateOrderStats(stats) {
+    const now = new Date();
+    const processedIncrement = stats?.success === true ? 1 : 0;
+    const failedIncrement = stats?.success === false ? 1 : 0;
+    const amountIncrement = Number(stats?.amount || 0);
+    const processingTime = Number(stats?.processingTime || 0);
+
+    await this.updateDailyStats(now, {
+      ordersProcessed: processedIncrement,
+      ordersFailed: failedIncrement,
+      totalAmount: amountIncrement,
+      avgProcessingTimeMs: processingTime
+    });
+
+    const columns = await this._getDailyStatsColumns();
+    const dateStr = now.toISOString().split('T')[0];
+
+    if (columns.total_processing_time_ms && processingTime) {
+      await db('daily_stats')
+        .where('date', dateStr)
+        .increment('total_processing_time_ms', processingTime);
+    }
+
+    const optionalCounters = [
+      ['contactCreated', 'contacts_created'],
+      ['leadCreated', 'leads_created'],
+      ['kaspiError', 'api_errors_kaspi'],
+      ['amocrmError', 'api_errors_amocrm'],
+      ['rateLimitHit', 'rate_limit_hits'],
+      ['reconcileUpdate', 'reconcile_updates']
+    ];
+
+    for (const [flag, column] of optionalCounters) {
+      if (stats?.[flag] && columns[column]) {
+        await this.incrementDailyStat(dateStr, column, 1);
+      }
+    }
+  }
+
+  async getStatsRange(startDate, endDate) {
+    const start = this._normalizeDateInput(startDate);
+    const end = this._normalizeDateInput(endDate);
+
+    return db('daily_stats')
+      .whereBetween('date', [start, end])
+      .orderBy('date', 'desc');
+  }
+
+  async getSummaryStats() {
+    const columns = await this._getDailyStatsColumns();
+    const query = db('daily_stats');
+    const sumMappings = {
+      orders_processed: 'total_orders_processed',
+      orders_failed: 'total_orders_failed',
+      contacts_created: 'total_contacts_created',
+      leads_created: 'total_leads_created',
+      total_amount: 'total_amount',
+      api_errors_kaspi: 'total_api_errors_kaspi',
+      api_errors_amocrm: 'total_api_errors_amocrm',
+      rate_limit_hits: 'total_rate_limit_hits',
+      reconcile_updates: 'total_reconcile_updates'
+    };
+
+    for (const [column, alias] of Object.entries(sumMappings)) {
+      if (columns[column]) {
+        query.sum({ [alias]: column });
+      }
+    }
+
+    if (columns.total_processing_time_ms) {
+      query.sum({ total_processing_time_ms: 'total_processing_time_ms' });
+    }
+
+    if (columns.avg_processing_time_ms) {
+      query.avg({ avg_processing_time_ms: 'avg_processing_time_ms' });
+    }
+
+    const result = (await query.first()) || {};
+    const summary = {};
+
+    for (const [column, alias] of Object.entries(sumMappings)) {
+      const value = columns[column] ? Number(result[alias] ?? 0) : 0;
+      summary[alias] = Number.isNaN(value) ? 0 : value;
+    }
+
+    if (columns.total_processing_time_ms) {
+      const totalProcessing = Number(result.total_processing_time_ms ?? 0);
+      summary.total_processing_time_ms = Number.isNaN(totalProcessing) ? 0 : totalProcessing;
+    }
+
+    const avgValue = columns.avg_processing_time_ms ? Number(result.avg_processing_time_ms ?? 0) : 0;
+    summary.avg_processing_time_ms = Number.isNaN(avgValue) ? 0 : avgValue;
+
+    return summary;
+  }
   
   async getStats() {
     const total = await this.getMeta('total_orders_processed') || '0';
@@ -305,210 +598,4 @@ class Repository {
 // Создаем синглтон
 const repository = new Repository();
 export default repository;
-
-// ========== ERROR LOG METHODS ==========
-
-/**
- * Логирование ошибки в БД
- * @param {Object} error - Объект ошибки
- * @returns {Promise<void>}
- */
-async logError(error) {
-  const errorData = {
-    order_code: error.orderCode || null,
-    error_type: error.type || 'unknown',
-    error_message: error.message || 'Unknown error',
-    error_details: error.details ? JSON.stringify(error.details) : null,
-    stack_trace: error.stack || null,
-    retry_attempt: error.retryAttempt || 0
-  };
-
-  if (this.dbClient === 'postgres') {
-    errorData.created_at_utc = new Date().toISOString();
-    await this.db('error_log').insert(errorData);
-  } else {
-    // SQLite - created_at_utc устанавливается автоматически через DEFAULT
-    await this.db('error_log').insert(errorData);
-  }
-
-  this.logger.debug({ errorData }, 'Error logged to database');
-}
-
-/**
- * Получение последних ошибок
- * @param {number} limit - Количество записей
- * @returns {Promise<Array>}
- */
-async getRecentErrors(limit = 10) {
-  return await this.db('error_log')
-    .orderBy('created_at_utc', 'desc')
-    .limit(limit);
-}
-
-/**
- * Получение ошибок по заказу
- * @param {string} orderCode - Код заказа
- * @returns {Promise<Array>}
- */
-async getOrderErrors(orderCode) {
-  return await this.db('error_log')
-    .where('order_code', orderCode)
-    .orderBy('created_at_utc', 'desc');
-}
-
-/**
- * Очистка старых ошибок
- * @param {number} daysToKeep - Сколько дней хранить
- * @returns {Promise<number>} Количество удаленных записей
- */
-async cleanOldErrors(daysToKeep = 30) {
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
-  
-  const deleted = await this.db('error_log')
-    .where('created_at_utc', '<', cutoffDate.toISOString())
-    .delete();
-    
-  this.logger.info({ deleted, daysToKeep }, 'Old errors cleaned');
-  return deleted;
-}
-
-// ========== DAILY STATS METHODS ==========
-
-/**
- * Получение или создание статистики за день
- * @param {string} date - Дата в формате YYYY-MM-DD
- * @returns {Promise<Object>}
- */
-async getDailyStats(date) {
-  const stats = await this.db('daily_stats')
-    .where('date', date)
-    .first();
-    
-  if (!stats) {
-    // Создаем пустую запись для сегодня
-    const newStats = {
-      date,
-      orders_processed: 0,
-      orders_failed: 0,
-      contacts_created: 0,
-      leads_created: 0,
-      total_processing_time_ms: 0,
-      avg_processing_time_ms: 0,
-      total_amount: 0,
-      api_errors_kaspi: 0,
-      api_errors_amocrm: 0,
-      rate_limit_hits: 0,
-      reconcile_updates: 0
-    };
-    
-    if (this.dbClient === 'postgres') {
-      newStats.created_at_utc = new Date().toISOString();
-      newStats.updated_at_utc = new Date().toISOString();
-    }
-    
-    await this.db('daily_stats').insert(newStats);
-    return newStats;
-  }
-  
-  return stats;
-}
-
-/**
- * Инкремент счетчика в daily_stats
- * @param {string} date - Дата YYYY-MM-DD
- * @param {string} field - Название поля
- * @param {number} increment - На сколько увеличить
- * @returns {Promise<void>}
- */
-async incrementDailyStat(date, field, increment = 1) {
-  // Убеждаемся, что запись существует
-  await this.getDailyStats(date);
-  
-  // Инкрементим поле
-  await this.db('daily_stats')
-    .where('date', date)
-    .increment(field, increment);
-    
-  // Обновляем updated_at_utc для PostgreSQL
-  if (this.dbClient === 'postgres') {
-    await this.db('daily_stats')
-      .where('date', date)
-      .update({ updated_at_utc: new Date().toISOString() });
-  }
-}
-
-/**
- * Обновление статистики после обработки заказа
- * @param {Object} stats - Объект со статистикой
- */
-async updateOrderStats(stats) {
-  const date = new Date().toISOString().split('T')[0];
-  
-  // Получаем текущую статистику
-  const currentStats = await this.getDailyStats(date);
-  
-  // Вычисляем новые значения
-  const totalProcessed = currentStats.orders_processed + (stats.success ? 1 : 0);
-  const totalFailed = currentStats.orders_failed + (stats.success ? 0 : 1);
-  const totalTime = currentStats.total_processing_time_ms + (stats.processingTime || 0);
-  
-  const updates = {
-    orders_processed: totalProcessed,
-    orders_failed: totalFailed,
-    total_processing_time_ms: totalTime,
-    avg_processing_time_ms: totalProcessed > 0 ? Math.round(totalTime / totalProcessed) : 0
-  };
-  
-  // Добавляем другие счетчики если есть
-  if (stats.contactCreated) updates.contacts_created = currentStats.contacts_created + 1;
-  if (stats.leadCreated) updates.leads_created = currentStats.leads_created + 1;
-  if (stats.amount) updates.total_amount = currentStats.total_amount + stats.amount;
-  if (stats.kaspiError) updates.api_errors_kaspi = currentStats.api_errors_kaspi + 1;
-  if (stats.amocrmError) updates.api_errors_amocrm = currentStats.api_errors_amocrm + 1;
-  if (stats.rateLimitHit) updates.rate_limit_hits = currentStats.rate_limit_hits + 1;
-  if (stats.reconcileUpdate) updates.reconcile_updates = currentStats.reconcile_updates + 1;
-  
-  // Обновляем БД
-  if (this.dbClient === 'postgres') {
-    updates.updated_at_utc = new Date().toISOString();
-  }
-  
-  await this.db('daily_stats')
-    .where('date', date)
-    .update(updates);
-    
-  this.logger.debug({ date, updates }, 'Daily stats updated');
-}
-
-/**
- * Получение статистики за период
- * @param {string} startDate - Начальная дата YYYY-MM-DD
- * @param {string} endDate - Конечная дата YYYY-MM-DD
- * @returns {Promise<Array>}
- */
-async getStatsRange(startDate, endDate) {
-  return await this.db('daily_stats')
-    .whereBetween('date', [startDate, endDate])
-    .orderBy('date', 'desc');
-}
-
-/**
- * Получение суммарной статистики
- * @returns {Promise<Object>}
- */
-async getSummaryStats() {
-  const result = await this.db('daily_stats')
-    .sum('orders_processed as total_orders_processed')
-    .sum('orders_failed as total_orders_failed')
-    .sum('contacts_created as total_contacts_created')
-    .sum('leads_created as total_leads_created')
-    .sum('total_amount as total_amount')
-    .sum('api_errors_kaspi as total_api_errors_kaspi')
-    .sum('api_errors_amocrm as total_api_errors_amocrm')
-    .sum('rate_limit_hits as total_rate_limit_hits')
-    .avg('avg_processing_time_ms as avg_processing_time_ms')
-    .first();
-    
-  return result;
-}
+export { repository };

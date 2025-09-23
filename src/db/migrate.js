@@ -23,10 +23,18 @@ async function runMigrations() {
     // Разбиваем на отдельные команды для SQLite
     // (SQLite не поддерживает множественные statements в одном вызове через Knex)
     if (dbType === 'sqlite') {
-      const statements = sql
+      const sanitizedSql = sql
+        .split('\n')
+        .map(line => {
+          const trimmedLine = line.trimStart();
+          return trimmedLine.startsWith('--') ? '' : line;
+        })
+        .join('\n');
+
+      const statements = sanitizedSql
         .split(';')
         .map(s => s.trim())
-        .filter(s => s.length > 0 && !s.startsWith('--'));
+        .filter(s => s.length > 0);
       
       for (const statement of statements) {
         try {
