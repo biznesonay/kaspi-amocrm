@@ -18,6 +18,58 @@ const stats = {
   startTime: Date.now()
 };
 
+function resetStats() {
+  stats.ordersChecked = 0;
+  stats.ordersCreated = 0;
+  stats.ordersUpdated = 0;
+  stats.ordersFailed = 0;
+  stats.startTime = Date.now();
+}
+
+export async function fetchUpdatedKaspiOrders(fromDate, params = {}) {
+  const kaspiOrders = [];
+  let page = 1;
+  let hasMore = true;
+  let totalCountLogged = false;
+
+  while (hasMore) {
+    const ordersResponse = await kaspiService.getOrdersUpdatedAfter(fromDate, {
+      ...params,
+      page
+    });
+
+    const pageOrders = ordersResponse.data || [];
+
+    if (!totalCountLogged) {
+      const totalCount = ordersResponse.meta?.totalCount ?? pageOrders.length;
+      logger.info({ ordersCount: totalCount }, 'Получены обновленные заказы из Kaspi');
+      totalCountLogged = true;
+    }
+
+    if (pageOrders.length === 0) {
+      break;
+    }
+
+    kaspiOrders.push(...pageOrders);
+
+    if (ordersResponse.meta) {
+      const { totalPages = 1 } = ordersResponse.meta;
+      hasMore = page < totalPages;
+    } else {
+      hasMore = pageOrders.length === config.KASPI_PAGE_SIZE;
+    }
+
+    page++;
+
+    if (page > 100) {
+      logger.warn('Достигнут лимит страниц (100) при получении обновленных заказов из Kaspi');
+      break;
+    }
+  }
+
+  return kaspiOrders;
+}
+
 /**
  * Сверяет и обновляет один заказ
  */
@@ -185,10 +237,12 @@ async function reconcile() {
       logger.info('Другой процесс уже выполняет сверку, пропускаем');
       return;
     }
-    
+
+    resetStats();
+
     // Получаем водяной знак последней сверки
     const watermark = await repository.getReconcileWatermark();
-    
+
     // Добавляем 2-часовой буфер для надежности
     const fromDate = new Date(watermark.getTime() - 2 * 60 * 60 * 1000);
     
@@ -199,13 +253,10 @@ async function reconcile() {
     }, '🔄 Начинаем инкрементальную сверку');
     
     // Получаем обновленные заказы из Kaspi
-    const ordersResponse = await kaspiService.getOrdersUpdatedAfter(fromDate, {
+    const kaspiOrders = await fetchUpdatedKaspiOrders(fromDate, {
       state: config.KASPI_ALLOWED_STATES_ARRAY
     });
-    
-    const kaspiOrders = ordersResponse.data || [];
-    logger.info({ ordersCount: kaspiOrders.length }, 'Получены обновленные заказы из Kaspi');
-    
+
     if (kaspiOrders.length === 0) {
       logger.info('Нет заказов для сверки');
       await repository.updateReconcileWatermark(new Date());
