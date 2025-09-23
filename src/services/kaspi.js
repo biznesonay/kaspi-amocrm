@@ -58,6 +58,24 @@ const KaspiOrdersResponseSchema = z.object({
   }).optional(),
 });
 
+const isPlainObject = (value) => Object.prototype.toString.call(value) === '[object Object]';
+
+const sortKeysRecursively = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((item) => sortKeysRecursively(item));
+  }
+
+  if (isPlainObject(value)) {
+    const sortedObject = {};
+    for (const key of Object.keys(value).sort()) {
+      sortedObject[key] = sortKeysRecursively(value[key]);
+    }
+    return sortedObject;
+  }
+
+  return value;
+};
+
 class KaspiService {
   constructor() {
     const rawBaseUrl = config.KASPI_BASE_URL.replace(/\/+$/, '');
@@ -233,17 +251,57 @@ class KaspiService {
    * Вычисляет контрольную сумму заказа для проверки изменений
    */
   calculateChecksum(order) {
-    const data = {
-      totalPrice: order.totalPrice,
-      state: order.state,
-      items: order.items?.map(item => ({
-        sku: item.sku,
-        quantity: item.quantity,
-        price: item.price
-      })) || []
+    const safeOrder = order ?? {};
+
+    const normalizeItem = (item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return sortKeysRecursively({
+          sku: null,
+          quantity: null,
+          price: null,
+          value: item ?? null,
+        });
+      }
+
+      const normalizedItem = {
+        ...item,
+        sku: item?.sku ?? null,
+        quantity: item?.quantity ?? null,
+        price: item?.price ?? null,
+      };
+
+      return sortKeysRecursively(normalizedItem);
     };
-    
-    const json = JSON.stringify(data, Object.keys(data).sort());
+
+    const normalizedItems = (Array.isArray(safeOrder.items) ? safeOrder.items : [])
+      .map((item) => {
+        const canonicalItem = normalizeItem(item);
+        return {
+          canonical: canonicalItem,
+          serialized: JSON.stringify(canonicalItem),
+          sortSku: canonicalItem?.sku == null ? '' : String(canonicalItem.sku),
+        };
+      });
+
+    normalizedItems.sort((a, b) => {
+      if (a.sortSku < b.sortSku) return -1;
+      if (a.sortSku > b.sortSku) return 1;
+
+      if (a.serialized < b.serialized) return -1;
+      if (a.serialized > b.serialized) return 1;
+
+      return 0;
+    });
+
+    const sortedItems = normalizedItems.map((entry) => entry.canonical);
+
+    const canonicalData = sortKeysRecursively({
+      totalPrice: safeOrder?.totalPrice ?? null,
+      state: safeOrder?.state ?? null,
+      items: sortedItems,
+    });
+
+    const json = JSON.stringify(canonicalData);
     return crypto.createHash('md5').update(json).digest('hex');
   }
   
