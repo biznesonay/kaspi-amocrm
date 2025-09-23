@@ -448,33 +448,95 @@ class AmoCRMService {
    * Обновляет позиции товаров в сделке
    */
   async updateLeadProducts(leadId, items) {
-    const catalogElements = items.map(item => ({
-      name: item.name || item.sku,
-      quantity: item.quantity || 1,
-      price: item.price || 0
-    }));
-    
-    // Сначала удаляем старые позиции
+    const safeItems = Array.isArray(items) ? items : [];
+
+    let existingCatalogElements = [];
+    let fallbackCatalogId = config.USE_FREE_POSITIONS ? -1 : null;
+
     try {
       const lead = await this.getLeadById(leadId);
-      if (lead._embedded?.catalog_elements?.length) {
-        // TODO: Реализовать удаление старых позиций если нужно
-        logger.warn('Удаление старых позиций не реализовано');
+      existingCatalogElements = Array.isArray(lead._embedded?.catalog_elements)
+        ? lead._embedded.catalog_elements
+        : [];
+
+      const elementWithCatalog = existingCatalogElements.find(element =>
+        element?.catalog_id != null || element?.catalogId != null
+      );
+
+      if (elementWithCatalog) {
+        fallbackCatalogId = elementWithCatalog.catalog_id ?? elementWithCatalog.catalogId ?? fallbackCatalogId;
       }
     } catch (error) {
-      logger.error({ error: error.message }, 'Ошибка при получении текущих позиций');
+      logger.error({ leadId, error: error.message }, 'Не удалось получить текущие позиции сделки перед обновлением');
+      throw error;
     }
-    
-    // Добавляем новые позиции
-    const payload = catalogElements;
-    
+
+    if (fallbackCatalogId == null) {
+      const itemWithCatalog = safeItems.find(item => item?.catalog_id != null || item?.catalogId != null);
+      if (itemWithCatalog) {
+        fallbackCatalogId = itemWithCatalog.catalog_id ?? itemWithCatalog.catalogId;
+      }
+    }
+
+    if (fallbackCatalogId == null) {
+      fallbackCatalogId = -1;
+      if (!config.USE_FREE_POSITIONS) {
+        logger.warn({ leadId }, 'catalog_id не найден, используем свободные позиции (catalog_id = -1)');
+      }
+    }
+
+    if (existingCatalogElements.length > 0) {
+      const unlinkPayload = existingCatalogElements
+        .filter(element => element?.id != null)
+        .map(element => ({
+          id: element.id,
+          catalog_id: element.catalog_id ?? element.catalogId ?? fallbackCatalogId
+        }));
+
+      if (unlinkPayload.length > 0) {
+        await withRetry(
+          async () => {
+            await this.client.post(`/leads/${leadId}/unlink`, {
+              catalog_elements: unlinkPayload
+            });
+          },
+          {
+            maxAttempts: 2,
+            shouldRetry: isRetryableError,
+            context: 'amoCRM.updateLeadProducts.unlink'
+          }
+        );
+
+        logger.debug({ leadId, removed: unlinkPayload.length }, 'Удалены старые позиции товаров');
+      } else {
+        logger.debug({ leadId }, 'Текущие позиции не содержат идентификаторов для отвязки');
+      }
+    }
+
+    const catalogElements = safeItems.map(item => {
+      const rawQuantity = item?.quantity ?? 1;
+      const quantityNumber = Number(rawQuantity);
+      const quantity = Number.isFinite(quantityNumber) && quantityNumber > 0 ? quantityNumber : 1;
+
+      const rawPrice = item?.price ?? 0;
+      const priceNumber = Number(rawPrice);
+      const price = Number.isFinite(priceNumber) ? Math.round(priceNumber) : 0;
+
+      return {
+        catalog_id: item?.catalog_id ?? item?.catalogId ?? fallbackCatalogId,
+        name: item?.name || item?.sku,
+        quantity,
+        price
+      };
+    });
+
     return await withRetry(
       async () => {
         const response = await this.client.post(`/leads/${leadId}/link`, {
-          catalog_elements: payload
+          catalog_elements: catalogElements
         });
-        
-        logger.info({ leadId, itemsCount: items.length }, 'Обновлены позиции товаров');
+
+        logger.info({ leadId, itemsCount: safeItems.length }, 'Обновлены позиции товаров');
         return response.data;
       },
       {
