@@ -177,7 +177,8 @@ async function processOrder(order) {
  */
 async function pollAndCreate() {
   const runId = logger.startOperation('poll-and-create');
-  
+  const shouldPersist = !config.DRY_RUN;
+
   try {
     // Проверяем подключение к БД
     const dbConnected = await checkDatabaseConnection();
@@ -211,7 +212,9 @@ async function pollAndCreate() {
     if (totalOrdersCount === 0) {
       logger.info('Нет новых заказов для обработки');
       await repository.releaseLock('poll');
-      await repository.updateHeartbeat();
+      if (shouldPersist) {
+        await repository.updateHeartbeat();
+      }
       return;
     }
 
@@ -219,43 +222,47 @@ async function pollAndCreate() {
     for (const order of orders) {
       await processOrder(order);
     }
-    
+
     // Обновляем статистику в БД
     const avgProcessingTime = stats.processingTimes.length > 0
       ? Math.round(stats.processingTimes.reduce((a, b) => a + b, 0) / stats.processingTimes.length)
       : 0;
-    
-    await repository.updateDailyStats(new Date(), {
-      ordersProcessed: stats.ordersProcessed,
-      ordersFailed: stats.ordersFailed,
-      totalAmount: stats.totalAmount,
-      avgProcessingTimeMs: avgProcessingTime
-    });
-    
-    // Обновляем метаданные
-    const totalProcessed = parseInt(await repository.getMeta('total_orders_processed') || '0');
-    const totalFailed = parseInt(await repository.getMeta('total_orders_failed') || '0');
-    
-    await repository.setMeta('total_orders_processed', totalProcessed + stats.ordersProcessed);
-    await repository.setMeta('total_orders_failed', totalFailed + stats.ordersFailed);
 
-    // Проверяем пороги для алертов
-    const backlog = totalOrdersCount - stats.ordersProcessed - stats.ordersSkipped;
-    if (backlog >= config.ALERT_BACKLOG_THRESHOLD) {
-      await alertService.sendWarningAlert(
-        'Большой backlog заказов',
-        `${backlog} заказов не обработано в текущем цикле`,
-        { backlog, threshold: config.ALERT_BACKLOG_THRESHOLD }
-      );
+    if (shouldPersist) {
+      await repository.updateDailyStats(new Date(), {
+        ordersProcessed: stats.ordersProcessed,
+        ordersFailed: stats.ordersFailed,
+        totalAmount: stats.totalAmount,
+        avgProcessingTimeMs: avgProcessingTime
+      });
+
+      // Обновляем метаданные
+      const totalProcessed = parseInt(await repository.getMeta('total_orders_processed') || '0');
+      const totalFailed = parseInt(await repository.getMeta('total_orders_failed') || '0');
+
+      await repository.setMeta('total_orders_processed', totalProcessed + stats.ordersProcessed);
+      await repository.setMeta('total_orders_failed', totalFailed + stats.ordersFailed);
+
+      // Проверяем пороги для алертов
+      const backlog = totalOrdersCount - stats.ordersProcessed - stats.ordersSkipped;
+      if (backlog >= config.ALERT_BACKLOG_THRESHOLD) {
+        await alertService.sendWarningAlert(
+          'Большой backlog заказов',
+          `${backlog} заказов не обработано в текущем цикле`,
+          { backlog, threshold: config.ALERT_BACKLOG_THRESHOLD }
+        );
+      }
+
+      // Успешное завершение - сбрасываем счетчик ошибок
+      await repository.resetFailures();
+      await repository.updateHeartbeat();
+    } else {
+      logger.debug('[DRY_RUN] Пропускаем обновление статистики, метаданных и алертов');
     }
-    
-    // Успешное завершение - сбрасываем счетчик ошибок
-    await repository.resetFailures();
-    await repository.updateHeartbeat();
-    
+
     // Освобождаем лок
     await repository.releaseLock('poll');
-    
+
     const duration = Date.now() - stats.startTime;
     logger.endOperation('poll-and-create', runId, {
       duration,
@@ -277,31 +284,37 @@ async function pollAndCreate() {
     
   } catch (error) {
     logger.operationError('poll-and-create', error, { runId });
-    
-    // Увеличиваем счетчик ошибок
-    const failures = await repository.incrementFailures();
-    
-    // Сохраняем информацию об ошибке
-    await repository.logError('POLL_ERROR', error.message, {
-      runId,
-      stats
-    });
-    
-    // Проверяем пороги для критических алертов
-    if (failures >= config.ALERT_FAIL_STREAK) {
-      await alertService.sendCriticalAlert(
-        'Критическая ошибка опроса',
-        error.message,
-        { failures, runId }
-      );
+
+    if (shouldPersist) {
+      // Увеличиваем счетчик ошибок
+      const failures = await repository.incrementFailures();
+
+      // Сохраняем информацию об ошибке
+      await repository.logError('POLL_ERROR', error.message, {
+        runId,
+        stats
+      });
+
+      // Проверяем пороги для критических алертов
+      if (failures >= config.ALERT_FAIL_STREAK) {
+        await alertService.sendCriticalAlert(
+          'Критическая ошибка опроса',
+          error.message,
+          { failures, runId }
+        );
+      }
+    } else {
+      logger.debug('[DRY_RUN] Пропускаем обновление счетчиков ошибок и критические алерты');
     }
-    
+
     // Освобождаем лок в любом случае
     await repository.releaseLock('poll');
-    
+
     throw error;
   }
 }
+
+export { pollAndCreate };
 
 // Обработка сигналов завершения
 process.on('SIGTERM', async () => {
