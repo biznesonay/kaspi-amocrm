@@ -412,13 +412,12 @@ class AmoCRMService {
       note_type: 'common',
       params: {
         text
-      },
-      entity_id: leadId
+      }
     }];
-    
+
     return await withRetry(
       async () => {
-        const response = await this.client.post('/leads/notes', payload);
+        const response = await this.client.post(`/leads/${leadId}/notes`, payload);
         logger.debug({ leadId, textLength: text.length }, 'Добавлена заметка к сделке');
         return response.data._embedded.notes[0];
       },
